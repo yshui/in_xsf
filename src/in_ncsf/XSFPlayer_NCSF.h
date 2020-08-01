@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <bitset>
+#include "XSFConfig_NCSF.h"
 #include "XSFPlayer.h"
 #include "SSEQPlayer/SDAT.h"
 #include "SSEQPlayer/Player.h"
@@ -31,10 +32,7 @@ class XSFPlayer_NCSF : public XSFPlayer
 	bool RecursiveLoadNCSF(XSFFile *xSFToLoad, int level);
 	bool LoadNCSF();
 public:
-	XSFPlayer_NCSF(const std::string &filename);
-#ifdef _WIN32
-	XSFPlayer_NCSF(const std::wstring &filename);
-#endif
+	XSFPlayer_NCSF(const std::string &filename, const XSFConfig_NCSF &);
 	~XSFPlayer_NCSF();
 	bool Load();
 	void GenerateSamples(std::vector<uint8_t> &buf, unsigned offset, unsigned samples);
@@ -42,7 +40,4 @@ public:
 
 	void SetInterpolation(unsigned interpolation);
 	void SetMutes(const std::bitset<16> &newMutes);
-#ifdef _DEBUG
-	const Channel &GetChannel(size_t chanNum) const;
-#endif
 };

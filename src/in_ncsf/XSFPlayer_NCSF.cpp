@@ -15,27 +15,13 @@
 #include <zlib.h>
 #include "convert.h"
 #include "XSFPlayer_NCSF.h"
-#include "XSFConfig_NCSF.h"
 #include "XSFCommon.h"
+#include "XSFConfig.h"
 #include "SSEQPlayer/SDAT.h"
 #include "SSEQPlayer/Player.h"
 
 const char *XSFPlayer::WinampDescription = "NCSF Decoder";
 const char *XSFPlayer::WinampExts = "ncsf;minincsf\0DS Nitro Composer Sound Format files (*.ncsf;*.minincsf)\0";
-
-extern XSFConfig *xSFConfig;
-
-XSFPlayer *XSFPlayer::Create(const std::string &fn)
-{
-	return new XSFPlayer_NCSF(fn);
-}
-
-#ifdef _WIN32
-XSFPlayer *XSFPlayer::Create(const std::wstring &fn)
-{
-	return new XSFPlayer_NCSF(fn);
-}
-#endif
 
 void XSFPlayer_NCSF::MapNCSFSection(const std::vector<uint8_t> &section)
 {
@@ -106,66 +92,20 @@ bool XSFPlayer_NCSF::LoadNCSF()
 	return this->RecursiveLoadNCSF(this->xSF.get(), 1);
 }
 
-XSFPlayer_NCSF::XSFPlayer_NCSF(const std::string &filename) : XSFPlayer()
+XSFPlayer_NCSF::XSFPlayer_NCSF(const std::string &filename, const XSFConfig_NCSF &cfg) : XSFPlayer(cfg)
 {
-	this->uses32BitSamplesClampedTo16Bit = true;
+	this->uses32BitSamples = false;
 	this->xSF.reset(new XSFFile(filename, 8, 12));
 }
-
-#ifdef _WIN32
-XSFPlayer_NCSF::XSFPlayer_NCSF(const std::wstring &filename) : XSFPlayer()
-{
-	this->uses32BitSamplesClampedTo16Bit = true;
-	this->xSF.reset(new XSFFile(filename, 8, 12));
-}
-#endif
-
-#ifdef _DEBUG
-static HANDLE soundViewThreadHandle = INVALID_HANDLE_VALUE;
-static bool killSoundViewThread;
-
-static DWORD WINAPI soundViewThread(void *b)
-{
-	auto xSFConfig_NCSF = static_cast<XSFConfig_NCSF *>(xSFConfig);
-	xSFConfig_NCSF->CallSoundView(static_cast<XSFPlayer_NCSF *>(b), xSFConfig->GetHInstance(), nullptr);
-	MSG msg;
-	while (!killSoundViewThread)
-	{
-		xSFConfig_NCSF->RefreshSoundView();
-		if (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
-		{
-			TranslateMessage(&msg);
-			DispatchMessageW(&msg);
-		}
-	}
-	xSFConfig_NCSF->CloseSoundView();
-	return 0;
-}
-#endif
 
 XSFPlayer_NCSF::~XSFPlayer_NCSF()
 {
-#ifdef _DEBUG
-	killSoundViewThread = true;
-	if (WaitForSingleObject(soundViewThreadHandle, 2000) == WAIT_TIMEOUT)
-	{
-		TerminateThread(soundViewThreadHandle, 0);
-		static_cast<XSFConfig_NCSF *>(xSFConfig)->CloseSoundView();
-	}
-	CloseHandle(soundViewThreadHandle);
-	soundViewThreadHandle = INVALID_HANDLE_VALUE;
-#endif
 }
 
 bool XSFPlayer_NCSF::Load()
 {
 	if (!this->LoadNCSF())
 		return false;
-
-#ifdef _DEBUG
-	killSoundViewThread = false;
-	soundViewThreadHandle = CreateThread(nullptr, 0, soundViewThread, this, 0, nullptr);
-#endif
 
 	std::srand(static_cast<unsigned>(std::time(nullptr)));
 
@@ -175,10 +115,10 @@ bool XSFPlayer_NCSF::Load()
 	auto *sseqToPlay = this->sdat->sseq.get();
 	this->player.allowedChannels = std::bitset<16>(this->sdat->player.channelMask);
 	this->player.sseqVol = Cnv_Scale(sseqToPlay->info.vol);
-	this->player.sampleRate = this->sampleRate;
+	this->player.sampleRate = this->GetSampleRate();
 	this->player.Setup(sseqToPlay);
 	this->player.Timer();
-	this->secondsPerSample = 1.0 / this->sampleRate;
+	this->secondsPerSample = 1.0 / this->GetSampleRate();
 	this->secondsIntoPlayback = 0;
 	this->secondsUntilNextClock = SecondsPerClockCycle;
 
@@ -187,7 +127,7 @@ bool XSFPlayer_NCSF::Load()
 
 static inline int32_t muldiv7(int32_t val, uint8_t mul)
 {
-	return mul == 127 ? val : ((val * mul) >> 7);
+	return mul == 127 ? val : ((val * mul) / 127);
 }
 
 void XSFPlayer_NCSF::GenerateSamples(std::vector<uint8_t> &buf, unsigned offset, unsigned samples)
@@ -225,12 +165,12 @@ void XSFPlayer_NCSF::GenerateSamples(std::vector<uint8_t> &buf, unsigned offset,
 
 		buf[offset++] = leftChannel & 0xFF;
 		buf[offset++] = (leftChannel >> 8) & 0xFF;
-		buf[offset++] = (leftChannel >> 16) & 0xFF;
-		buf[offset++] = (leftChannel >> 24) & 0xFF;
+		//buf[offset++] = (leftChannel >> 16) & 0xFF;
+		//buf[offset++] = (leftChannel >> 24) & 0xFF;
 		buf[offset++] = rightChannel & 0xFF;
 		buf[offset++] = (rightChannel >> 8) & 0xFF;
-		buf[offset++] = (rightChannel >> 16) & 0xFF;
-		buf[offset++] = (rightChannel >> 24) & 0xFF;
+		//buf[offset++] = (rightChannel >> 16) & 0xFF;
+		//buf[offset++] = (rightChannel >> 24) & 0xFF;
 
 		if (this->secondsIntoPlayback > this->secondsUntilNextClock)
 		{
@@ -254,10 +194,3 @@ void XSFPlayer_NCSF::SetMutes(const std::bitset<16> &newMutes)
 {
 	this->mutes = newMutes;
 }
-
-#ifdef _DEBUG
-const Channel &XSFPlayer_NCSF::GetChannel(size_t chanNum) const
-{
-	return this->player.channels[chanNum];
-}
-#endif
