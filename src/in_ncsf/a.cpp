@@ -60,5 +60,6 @@ int main(int argc, const char **argv){
 	while(!player.FillBuffer(buf, written)){
 		fwrite(buf.data(), 1, 4096, outf);
 	}
+	fwrite(buf.data(), 1, 4096, outf);
 	fclose(outf);
 }
